@@ -25,7 +25,7 @@
 
 #define DEBUG 0        // 1 = affiche distances et décisions dans le moniteur série (9600)
 #define LOG 1          // 1 = enregistre les 20 premiers virages en EEPROM, relus au démarrage sur le moniteur série (9600)
-#define TEST_PIVOT 1   // 1 = le robot fait juste 2 pas de pivot (doit faire 90°) toutes les 3 s, pour régler T_PAS
+#define TEST_PIVOT 0   // 1 = le robot fait juste 2 pas de pivot (doit faire 90°) toutes les 3 s, pour régler T_PAS
 
 // ---------- Brochage ----------
 enum { GAUCHE = 0, AVANT = 1, DROITE = 2 };
@@ -40,14 +40,14 @@ const int STOP_G = 1485;         // roue gauche immobile (zone morte 1468-1502, 
 const int STOP_D = 1470;         // roue droite immobile (mesuré)
 const int V_MAX = 90;           // vitesse en ligne droite (µs autour du STOP)
 const int V_MIN = 60;            // vitesse juste avant un mur (zone morte des roues ~±17 : rester bien au-dessus)
-const int V_PIVOT = 70;          // vitesse de pivot : plus lent = les capteurs suivent mieux
-const int T_PAS = 290;           // durée d'un pas de pivot de ~45° à V_PIVOT (ms) — à régler avec TEST_PIVOT
+const int V_PIVOT = 150;         // vitesse de pivot (mesure faite à l'arrêt entre les pas : elle peut être franche)
+const int T_PAS = 195;           // durée d'un pas de pivot de ~45° à V_PIVOT (ms) — à régler avec TEST_PIVOT
 const int PAUSE_MESURE = 120;    // arrêt après chaque pas, avant de mesurer (ms)
 const int DIST_VIRAGE = 60;      // tourne sous cette distance au mur devant (mm). 30 était trop près : il calait avant d'y arriver
 const int DIST_TOUT_DROIT = 100; // plus de correction latérale sous cette distance : les capteurs latéraux voient les coins
 const int DIST_RALENTIR = 190;   // commence à ralentir sous cette distance (mm, portée max ~200)
 const int AVANT_DEGAGE = 150;    // virage fini quand l'avant voit plus loin que ça (mm)
-const int COTE_OUVERT = 220;     // côté "ouvert" : le capteur ne voit rien (il renvoie 255 au-delà de ~20 cm)
+const int COTE_OUVERT = 100;     // au-delà, pas de mur latéral pour se centrer (mur ~75 mm, ouverture ~110-140 mm mesurés)
 const int ECART_MIN = 30;        // au virage, si un côté voit 3 cm plus loin que l'autre, on va de ce côté
 const int CONSIGNE_COTE = 70;    // valeur de départ, remplacée dès qu'il voit un mur
 const int DIST_MUR_MIN = 40;     // ne s'approche jamais à moins de 4 cm d'un mur latéral
@@ -100,8 +100,16 @@ void logResultat(uint8_t) {}
 
 // g, d : vitesse de chaque roue en µs autour du STOP, positif = marche avant
 void moteurs(int g, int d) {
+  if (!servoG.attached()) { servoG.attach(PIN_SERVO_G); servoD.attach(PIN_SERVO_D); }
   servoG.writeMicroseconds(STOP_G + g);
   servoD.writeMicroseconds(STOP_D - d);   // servo droit monté en miroir
+}
+
+// Arrêt franc : plus aucun signal, le servo ne bouge plus quel que soit le réglage du STOP
+// (au sol, la valeur STOP mesurée roues en l'air laissait le robot dériver)
+void arret() {
+  servoG.detach();
+  servoD.detach();
 }
 
 int lire(int i) {
@@ -123,7 +131,7 @@ void pas(char sens) {
   if (sens == 'G') moteurs(-V_PIVOT, V_PIVOT);
   else             moteurs(V_PIVOT, -V_PIVOT);
   delay(T_PAS);
-  moteurs(0, 0);
+  arret();
   delay(PAUSE_MESURE);
 }
 
@@ -139,59 +147,38 @@ bool pivoter(char sens, int pasMin, int pasMax) {
 }
 
 void virage() {
-  moteurs(0, 0);
-  delay(50);
+  arret();
+  delay(PAUSE_MESURE);
 
-  // Regarde à gauche et à droite (2 mesures chacun, on garde la plus grande)
-  int g1 = lire(GAUCHE), g2 = lire(GAUCHE);
-  int d1 = lire(DROITE), d2 = lire(DROITE);
-  int g = max(g1, g2);
-  int d = max(d1, d2);
-  bool libreG = g >= COTE_OUVERT;
-  bool libreD = d >= COTE_OUVERT;
-
-  // Un côté nettement plus dégagé que l'autre ? On y va, même si l'autre n'est pas "fermé"
-  if (g - d > ECART_MIN) { libreG = true;  libreD = false; }
-  if (d - g > ECART_MIN) { libreD = true;  libreG = false; }
+  // Les capteurs latéraux servent seulement d'indice pour choisir le côté à essayer en premier :
+  // au mur, le côté ouvert lit ~110-140 mm (pas 255), le côté fermé ~40-80 mm (journal du 16/10).
+  int g = max(lire(GAUCHE), lire(GAUCHE));
+  int d = max(lire(DROITE), lire(DROITE));
+  char premier;
+  if (g - d > ECART_MIN)      premier = 'G';
+  else if (d - g > ECART_MIN) premier = 'D';
+  else                        premier = COTE_PREFERE;
+  char autre = (premier == 'G') ? 'D' : 'G';
 
 #if DEBUG
   Serial.print(F("Mur devant  G=")); Serial.print(g);
   Serial.print(F("  D=")); Serial.print(d);
+  Serial.print(F("  -> essaie ")); Serial.println(premier);
 #endif
+  bip(premier);
+  logDebut(g, d, premier == 'G' ? 2 : 3);
 
-  if (!libreG && !libreD) {
-    // Cul-de-sac : demi-tour (pivote jusqu'à ce que l'avant se libère)
-#if DEBUG
-    Serial.println(F("  -> demi-tour"));
-#endif
-    doubleBip();
-    logDebut(g, d, 1);
-    logResultat(pivoter(COTE_PREFERE, 4, 6) ? 1 : 3);   // 180°, jusqu'à 270°
-    moteurs(V_MIN, V_MIN);
-    return;
-  }
+  // C'est le capteur avant qui décide, robot à l'arrêt :
+  // 1) quart de tour du côté le plus prometteur, l'avant est libre ? on y va
+  if (pivoter(premier, 2, 2)) { logResultat(1); moteurs(V_MIN, V_MIN); return; }
 
-  char sens;
-  if (libreG && libreD) sens = COTE_PREFERE;
-  else                  sens = libreG ? 'G' : 'D';
-  char autre = (sens == 'G') ? 'D' : 'G';
-
-#if DEBUG
-  Serial.print(F("  -> ")); Serial.println(sens);
-#endif
-  bip(sens);
-  logDebut(g, d, sens == 'G' ? 2 : 3);
-
-  // Pivot du côté ouvert : 90°, jusqu'à 135° si l'avant n'est pas encore libre
-  if (pivoter(sens, 2, 3)) { logResultat(1); moteurs(V_MIN, V_MIN); return; }
-
-  // Toujours bouché (mesure faussée) : on repart de l'autre côté (135° de retour + 90°)
+  // 2) sinon demi-tour complet vers l'autre côté (180° depuis ici), l'avant est libre ? on y va
   doubleBip();
-  if (pivoter(autre, 5, 7)) { logResultat(2); moteurs(V_MIN, V_MIN); return; }
+  if (pivoter(autre, 4, 4)) { logResultat(2); moteurs(V_MIN, V_MIN); return; }
 
-  // Toujours rien : on continue jusqu'à trouver une sortie
+  // 3) sinon cul-de-sac : encore un quart de tour, il repart par où il est venu
   logResultat(3);
-  pivoter(autre, 1, 8);
+  pivoter(autre, 2, 2);
   moteurs(V_MIN, V_MIN);
 }
 
@@ -229,7 +216,7 @@ void setup() {
 
   servoG.attach(PIN_SERVO_G);
   servoD.attach(PIN_SERVO_D);
-  moteurs(0, 0);
+  arret();
   delay(2000);   // 2 s pour poser le robot
 }
 
