@@ -30,11 +30,8 @@ const int STOP_G = 1485;         // milieu de la zone morte roue gauche
 const int STOP_D = 1470;         // milieu de la zone morte roue droite
 const int US_PAR_DEGRE = 10;     // conversion des "degrés" du code d'origine
 
-const int V_DROIT = 45;          // vitesse tout droit (servos saturés : 80 testé le 16/10, même temps, 16 s)
+const int V_DROIT = 45;          // vitesse tout droit (degrés autour de l'arrêt ; 45 = quasi plein régime)
 const int AVANT_LIBRE = 220;     // au-delà : rien devant (mm)
-const int MUR_VU = 150;          // en dessous : mur latéral présent (côté ouvert ~170-190)
-const int GAIN_CENTRAGE = 4;     // 4 mm d'écart gauche/droite = 1 degré de correction
-const int CORR_MAX = 10;         // correction maximale en ligne droite
 
 VL6180X capteur[3];
 Servo servoG, servoD;
@@ -92,15 +89,7 @@ void loop() {
   if (dG < 0 || dAv < 0 || dD < 0) return;
 
   if (dAv > AVANT_LIBRE) {       // rien devant
-    // Deux murs vus : on se recentre en ralentissant la roue du côté où l'on veut aller
-    // (V_DROIT est déjà près du maximum, on ne peut pas accélérer l'autre)
-    if (dG < MUR_VU && dD < MUR_VU) {
-      int c = constrain(abs(dD - dG) / GAIN_CENTRAGE, 0, CORR_MAX);
-      if (dD > dG) moteurs(V_DROIT, V_DROIT - c);   // trop à gauche : vers la droite
-      else         moteurs(V_DROIT - c, V_DROIT);   // trop à droite : vers la gauche
-    } else {
-      moteurs(V_DROIT, V_DROIT);
-    }
+    moteurs(V_DROIT, V_DROIT);
     return;
   }
   if (dAv <= 5) return;          // mesure aberrante
