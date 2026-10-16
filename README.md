@@ -13,6 +13,7 @@ Bibliothèques Arduino : `VL6180X` (Pololu), `Servo`. Carte : Arduino Nano, ATme
 | `04_labyrinthe_autonome` | Trouve les virages seul, demi-tour en cul-de-sac |
 | `05_labyrinthe_rapide` | Parcours connu rapide, capteurs diagonaux à 45° |
 | `06_suivi_mur_droit` | Longe le mur droit ; à chaque mur devant, prend le virage suivant de `PARCOURS` (`"GGGGD"`, validé sur la piste le 16/10). `PARCOURS = ""` : règle de la main droite |
+| `07_reactif` | Conduite continue sans arrêt : braque vers le côté le plus dégagé, d'autant plus fort que le mur devant est proche |
 | `_archive` | Anciens doublons |
 
 ## Valeurs mesurées

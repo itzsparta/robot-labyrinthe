@@ -43,13 +43,14 @@ const int PAUSE_MESURE = 120;   // arrêt après un pas, avant de mesurer (ms)
 const int PAUSE_COURTE = 120;    // arrêt après un pas sans mesure derrière (garde des pas d'angle régulier)
 
 // ---------- Réglages à ajuster sur la piste ----------
-const int V_SUIVI = 130;         // vitesse en ligne droite (µs autour du STOP, zone morte ~17) ; 110 validé le 16/10
+const int V_SUIVI = 130;         // vitesse en ligne droite (µs autour du STOP, zone morte ~17) ; à 150 il frotte le mur droit
 const int V_APPROCHE = 100;      // vitesse quand un mur approche devant, pour s'arrêter au même endroit
 const int AVANT_PROCHE = 120;    // en dessous (mm) : vitesse d'approche
 const int CONSIGNE = 75;         // distance capteur droit -> mur droit (mm), mesurée au centre d'un couloir
 const int MUR_PERDU = 110;       // au-delà : plus de mur à droite (ouverture lue ~110-140 mm)
 const int MUR_DEVANT = 45;       // en dessous : mur devant, il faut tourner à gauche (mm)
 const int AVANT_LIBRE = 150;     // après un pivot, l'avant est libre au-delà de ça (mm)
+const int SONDE_LIBRE = 200;     // sonde à droite : ouverture lue 255, mur jusqu'à 142 (journal du 16/10)
 const float KP = 0.4;            // correction proportionnelle à l'écart au mur (0.8 le mettait de travers)
 const float KD = 0.6;            // freine les oscillations (2.0 amplifiait le bruit de mesure)
 const int T_AVANCE_OUVERTURE = 450;  // ms d'avance tout droit avant de tourner dans une ouverture à droite
@@ -273,7 +274,7 @@ void loop() {
     for (int k = 1; k <= PAS_SONDE_D; k++) pas('D', k < PAS_SONDE_D ? PAUSE_COURTE : PAUSE_MESURE);
     int vue = max(lire(AVANT), lire(AVANT));
     journalMesure(vue, dD);                  // dernière paire du journal = mesure de la sonde
-    if (vue >= AVANT_LIBRE) {
+    if (vue >= SONDE_LIBRE) {
       journalVirage('D');
     } else {
       journalVirage('G');
