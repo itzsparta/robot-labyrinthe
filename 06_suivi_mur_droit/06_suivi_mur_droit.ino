@@ -40,9 +40,12 @@ const int PAS_MIN = 4;          // petits pas avant de regarder l'avant (~60° :
 const int PAS_MAX = 12;         // ~180° au plus
 const int PAS_SONDE_D = 6;      // ~90° : pivot fixe à droite face à un mur, pour regarder le côté droit de face
 const int PAUSE_MESURE = 120;   // arrêt après un pas, avant de mesurer (ms)
+const int PAUSE_COURTE = 120;    // arrêt après un pas sans mesure derrière (garde des pas d'angle régulier)
 
 // ---------- Réglages à ajuster sur la piste ----------
-const int V_SUIVI = 110;         // vitesse en ligne droite (µs autour du STOP, zone morte ~17)
+const int V_SUIVI = 130;         // vitesse en ligne droite (µs autour du STOP, zone morte ~17) ; 110 validé le 16/10
+const int V_APPROCHE = 100;      // vitesse quand un mur approche devant, pour s'arrêter au même endroit
+const int AVANT_PROCHE = 120;    // en dessous (mm) : vitesse d'approche
 const int CONSIGNE = 75;         // distance capteur droit -> mur droit (mm), mesurée au centre d'un couloir
 const int MUR_PERDU = 110;       // au-delà : plus de mur à droite (ouverture lue ~110-140 mm)
 const int MUR_DEVANT = 45;       // en dessous : mur devant, il faut tourner à gauche (mm)
@@ -150,12 +153,13 @@ void initCapteurs() {
 }
 
 // Un pas de pivot de ~45°, puis arrêt
-void pas(char sens) {
+// pause : temps d'arrêt après le pas (court si on ne mesure pas juste après)
+void pas(char sens, int pause = PAUSE_MESURE) {
   if (sens == 'G') moteurs(-V_PIVOT, V_PIVOT);
   else             moteurs(V_PIVOT, -V_PIVOT);
   delay(T_PAS);
   arret();
-  delay(PAUSE_MESURE);
+  delay(pause);
 }
 
 // Pivote par petits pas vers 'sens' jusqu'à ce que l'avant soit libre (au moins pasMin pas, au plus pasMax).
@@ -164,14 +168,14 @@ void pas(char sens) {
 int tourner(char sens, int pasMin, int pasMax) {
   tone(PIN_BUZZER, sens == 'D' ? 2500 : 1200, 60);
   for (int k = 1; k <= pasMax; k++) {
-    pas(sens);
+    pas(sens, k >= pasMin ? PAUSE_MESURE : PAUSE_COURTE);
     if (k >= pasMin && max(lire(AVANT), lire(AVANT)) >= AVANT_LIBRE) return k;
   }
   return 0;
 }
 
 void toutDroit(int ms) {
-  moteurs(V_SUIVI, V_SUIVI);
+  moteurs(110, 110);   // vitesse fixe : T_AVANCE_OUVERTURE et T_REPRISE sont réglés à 110
   delay(ms);
 }
 
@@ -266,7 +270,7 @@ void loop() {
     // On pivote donc d'un angle fixe (~90°) à droite et on mesure avec le capteur avant, de face :
     // de biais, il ne reçoit pas d'écho et croit la voie libre.
     tone(PIN_BUZZER, 2500, 60);
-    for (int k = 0; k < PAS_SONDE_D; k++) pas('D');
+    for (int k = 1; k <= PAS_SONDE_D; k++) pas('D', k < PAS_SONDE_D ? PAUSE_COURTE : PAUSE_MESURE);
     int vue = max(lire(AVANT), lire(AVANT));
     journalMesure(vue, dD);                  // dernière paire du journal = mesure de la sonde
     if (vue >= AVANT_LIBRE) {
@@ -308,6 +312,7 @@ void loop() {
   int ecart = (dG >= 0 && dG < MUR_PERDU) ? (dD - dG) / 2 : dD - CONSIGNE;
   int corr = (int)(KP * ecart + KD * (ecart - ecartPrec));
   ecartPrec = ecart;
-  corr = constrain(corr, -V_SUIVI / 4, V_SUIVI / 4);   // braquage doux : il reste dans l'axe du couloir
-  moteurs(V_SUIVI + corr, V_SUIVI - corr);
+  int v = (dAv < AVANT_PROCHE) ? V_APPROCHE : V_SUIVI;
+  corr = constrain(corr, -v / 4, v / 4);   // braquage doux : il reste dans l'axe du couloir
+  moteurs(v + corr, v - corr);
 }
