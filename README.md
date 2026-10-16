@@ -14,6 +14,7 @@ Bibliothèques Arduino : `VL6180X` (Pololu), `Servo`. Carte : Arduino Nano, ATme
 | `05_labyrinthe_rapide` | Parcours connu rapide, capteurs diagonaux à 45° |
 | `06_suivi_mur_droit` | Longe le mur droit ; à chaque mur devant, prend le virage suivant de `PARCOURS` (`"GGGGD"`, validé sur la piste le 16/10). `PARCOURS = ""` : règle de la main droite |
 | `07_reactif` | **Sketch de référence** (parcours complet réussi le 16/10, après remontage des capteurs). Conduite continue sans arrêt : braque vers le côté le plus dégagé, d'autant plus fort que le mur devant est proche. Pas de correction en ligne droite : un centrage essayé le 16/10 le ralentissait. 3 tours de suite sans erreur, 16 s le tour |
+| `08_test_vitesse` | Roule 2 s tout droit à plusieurs vitesses : mesurer la distance pour trouver la saturation des servos |
 | `_archive` | Anciens doublons |
 
 ## Valeurs mesurées
@@ -28,7 +29,8 @@ Bibliothèques Arduino : `VL6180X` (Pololu), `Servo`. Carte : Arduino Nano, ATme
 - Géométrie : couloir 22 cm, capteurs latéraux à 8 cm l'un de l'autre, nez à 5,5 cm de l'axe des roues
   (coin du nez à 8,5 cm de l'axe : un pivot sur place près d'un mur le fait frotter).
 - Servos saturés à `V_DROIT = 45` (450 µs autour du STOP) sous 5 V (batterie USB) : 80 en ligne droite ou des
-  virages plus rapides donnent le même temps (16 s) et font frotter. Seule piste restante : servos sous 6 V.
+  virages plus rapides donnent le même temps (16 s) et font frotter. Confirmé par `08_test_vitesse` (2 s tout droit
+  à 30/45/60/90 : même distance à partir de 45). Seule piste restante : servos sous 6 V.
 - Au sol, le STOP ne suffit pas à immobiliser le robot : arrêt par `detach()` des servos.
 
 `DEBUG 1` : affiche les distances dans le moniteur série. Dans `03`, `DEBUG 1` coupe aussi les moteurs. Passer à 0 pour rouler.
