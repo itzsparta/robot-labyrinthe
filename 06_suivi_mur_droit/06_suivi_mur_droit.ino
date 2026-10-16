@@ -22,6 +22,7 @@
 #include <EEPROM.h>
 
 #define DEBUG 0   // 1 = affiche G / AVANT / D et les décisions sur le moniteur série (9600)
+#define LENT 0    // 1 = mode observation : roule lentement, longues pauses, bip à chaque décision
 
 // ---------- Brochage ----------
 enum { GAUCHE = 0, AVANT = 1, DROITE = 2 };
@@ -39,12 +40,12 @@ const int T_PAS = 90;           // un petit pas de pivot = ~15° (à 150 : 195 m
 const int PAS_MIN = 4;          // petits pas avant de regarder l'avant (~60° : en biais il se croirait libre trop tôt)
 const int PAS_MAX = 12;         // ~180° au plus
 const int PAS_SONDE_D = 6;      // ~90° : pivot fixe à droite face à un mur, pour regarder le côté droit de face
-const int PAUSE_MESURE = 120;   // arrêt après un pas, avant de mesurer (ms)
-const int PAUSE_COURTE = 120;    // arrêt après un pas sans mesure derrière (garde des pas d'angle régulier)
+const int PAUSE_MESURE = LENT ? 400 : 120;   // arrêt après un pas, avant de mesurer (ms)
+const int PAUSE_COURTE = LENT ? 400 : 120;    // arrêt après un pas sans mesure derrière (garde des pas d'angle régulier)
 
 // ---------- Réglages à ajuster sur la piste ----------
-const int V_SUIVI = 130;         // vitesse en ligne droite (µs autour du STOP, zone morte ~17) ; à 150 il frotte le mur droit
-const int V_APPROCHE = 100;      // vitesse quand un mur approche devant, pour s'arrêter au même endroit
+const int V_SUIVI = LENT ? 60 : 130;         // vitesse en ligne droite (µs autour du STOP, zone morte ~17) ; à 150 il frotte le mur droit
+const int V_APPROCHE = LENT ? 45 : 100;      // vitesse quand un mur approche devant, pour s'arrêter au même endroit
 const int AVANT_PROCHE = 120;    // en dessous (mm) : vitesse d'approche
 const int CONSIGNE = 75;         // distance capteur droit -> mur droit (mm), mesurée au centre d'un couloir
 const int MUR_PERDU = 110;       // au-delà : plus de mur à droite (ouverture lue ~110-140 mm)
@@ -239,6 +240,11 @@ void loop() {
 #if DEBUG
     Serial.println(F("-> ouverture a droite"));
 #endif
+#if LENT
+    arret();                         // 3 bips aigus = mur droit perdu en ligne droite
+    for (int k = 0; k < 3; k++) { tone(PIN_BUZZER, 3000, 100); delay(200); }
+    delay(1000);
+#endif
     journalVirage('D');
     toutDroit(T_AVANCE_OUVERTURE);   // amène les roues au milieu de l'ouverture
     arret();
@@ -274,6 +280,12 @@ void loop() {
     for (int k = 1; k <= PAS_SONDE_D; k++) pas('D', k < PAS_SONDE_D ? PAUSE_COURTE : PAUSE_MESURE);
     int vue = max(lire(AVANT), lire(AVANT));
     journalMesure(vue, dD);                  // dernière paire du journal = mesure de la sonde
+#if LENT
+    // Annonce de la décision, robot immobile : 2 bips aigus = droite, 1 bip grave long = gauche
+    if (vue >= SONDE_LIBRE) { tone(PIN_BUZZER, 2500, 150); delay(300); tone(PIN_BUZZER, 2500, 150); }
+    else                    { tone(PIN_BUZZER, 600, 500); }
+    delay(1500);
+#endif
     if (vue >= SONDE_LIBRE) {
       journalVirage('D');
     } else {
