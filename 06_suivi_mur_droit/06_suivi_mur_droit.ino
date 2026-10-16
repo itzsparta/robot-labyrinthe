@@ -38,7 +38,7 @@ const int V_PIVOT = 110;        // vitesse des roues pendant un petit pas de piv
 const int T_PAS = 90;           // un petit pas de pivot = ~15° (à 150 : 195 ms faisaient ~45° sur table, plus sur la piste)
 const int PAS_MIN = 4;          // petits pas avant de regarder l'avant (~60° : en biais il se croirait libre trop tôt)
 const int PAS_MAX = 12;         // ~180° au plus
-const int PAS_SONDE_D = 7;      // ~105° : jusqu'où il regarde à droite face à un mur avant de renoncer
+const int PAS_SONDE_D = 6;      // ~90° : pivot fixe à droite face à un mur, pour regarder le côté droit de face
 const int PAUSE_MESURE = 120;   // arrêt après un pas, avant de mesurer (ms)
 
 // ---------- Réglages à ajuster sur la piste ----------
@@ -51,10 +51,12 @@ const float KP = 0.4;            // correction proportionnelle à l'écart au mu
 const float KD = 0.6;            // freine les oscillations (2.0 amplifiait le bruit de mesure)
 const int T_AVANCE_OUVERTURE = 450;  // ms d'avance tout droit avant de tourner dans une ouverture à droite
 const int T_REPRISE = 700;           // ms d'avance tout droit après ce virage, pour retrouver le mur droit
+const int T_COINCE = 40;             // boucles (~50 ms chacune) avec l'avant immobile avant de se dégager
+const int T_RECUL = 400;             // ms de marche arrière pour se dégager d'un mur
 
 // Parcours connu : sens du virage à chaque mur devant, dans l'ordre. Chaîne vide = règle de la main droite.
 // Les capteurs ne distinguent pas l'ouverture du 5e virage (capteur droit ~100 mm, comme aux coins à gauche).
-const char PARCOURS[] = "GGGGD";
+const char PARCOURS[] = "";   // "GGGGD" : version validée sur la piste le 16/10
 const uint8_t NB_PARCOURS = sizeof(PARCOURS) - 1;
 uint8_t iParcours = 0;
 
@@ -63,9 +65,10 @@ Servo servoG, servoD;
 int ecartPrec = 0;
 
 // ---------- Journal des virages (EEPROM, cumulatif, relu au démarrage à 9600 bauds) ----------
-// Octet 0 : nombre de virages, octet 1 : démarrages depuis effacement ('c' sur le port série = effacer)
-// Par virage, 17 octets : type ('G' mur devant, 'D' ouverture droite) puis les 8 dernières paires (avant, droite)
-const int NB_HIST = 8, NB_EVT = 8, TAILLE_EVT = 1 + 2 * NB_HIST;
+// Octet 0 : nombre d'événements, octet 1 : démarrages depuis effacement ('c' sur le port série = effacer)
+// Par événement, 17 octets : type ('G'/'D' virage, 'S' démarrage) puis les 8 dernières paires (avant, droite)
+// Tampon circulaire : on garde les NB_EVT derniers (les premiers étaient remplis en manipulant le robot)
+const int NB_HIST = 8, NB_EVT = 16, TAILLE_EVT = 1 + 2 * NB_HIST;
 uint8_t histAv[NB_HIST], histD[NB_HIST];
 uint8_t iHist = 0, nEvt = 0;
 
@@ -78,8 +81,8 @@ void journalMesure(int av, int d) {
 }
 
 void journalVirage(char type) {
-  if (nEvt >= NB_EVT) return;
-  int a = 2 + nEvt * TAILLE_EVT;
+  if (nEvt == 255) return;
+  int a = 2 + (nEvt % NB_EVT) * TAILLE_EVT;
   EEPROM.update(a, type);
   for (int k = 0; k < NB_HIST; k++) {          // de la plus ancienne à la plus récente
     int j = (iHist + k) % NB_HIST;
@@ -91,11 +94,11 @@ void journalVirage(char type) {
 
 void journalAfficher() {
   uint8_t n = EEPROM.read(0);
-  if (n > NB_EVT) n = 0;
   Serial.print(F("LOG ")); Serial.print(n);
-  Serial.print(F(" virages, demarrages : ")); Serial.println(EEPROM.read(1));
-  for (uint8_t i = 0; i < n; i++) {
-    int a = 2 + i * TAILLE_EVT;
+  Serial.print(F(" evenements, demarrages : ")); Serial.println(EEPROM.read(1));
+  uint8_t debut = n > NB_EVT ? n - NB_EVT : 0;
+  for (uint8_t i = debut; i < n; i++) {
+    int a = 2 + (i % NB_EVT) * TAILLE_EVT;
     Serial.print((char)EEPROM.read(a)); Serial.print(F("  avant/droite :"));
     for (int k = 0; k < NB_HIST; k++) {
       Serial.print(' '); Serial.print(EEPROM.read(a + 1 + 2 * k));
@@ -176,8 +179,8 @@ void setup() {
   Serial.begin(9600);
   journalAfficher();
   nEvt = EEPROM.read(0);
-  if (nEvt > NB_EVT) nEvt = 0;
   EEPROM.update(1, EEPROM.read(1) + 1);
+  journalVirage('S');   // sépare les courses dans le journal
   Wire.begin();
   Wire.setWireTimeout(3000, true);
 
@@ -191,6 +194,7 @@ void setup() {
 void loop() {
   int dAv = lire(AVANT);
   int dD  = lire(DROITE);
+  int dG  = lire(GAUCHE);   // -1 (muet) traité comme "pas de mur à gauche" : il ne sert qu'à centrer
 
 #if DEBUG
   Serial.print(F("AVANT=")); Serial.print(dAv);
@@ -214,6 +218,13 @@ void loop() {
     return;
   }
   muet = 0;
+
+  // Rien à moins de ~20 cm sur les trois capteurs : robot en l'air ou dans la main, on ne décide rien
+  if (dAv >= 255 && dD >= 255 && dG >= 255) {
+    arret();
+    delay(100);
+    return;
+  }
 
   // 1. Plus de mur à droite (2 mesures de suite) : on prend l'ouverture
   static uint8_t perdu = 0;
@@ -251,20 +262,50 @@ void loop() {
       ecartPrec = 0;
       return;
     }
-    journalVirage('G');
-#if DEBUG
-    Serial.println(F("-> mur devant, gauche"));
-#endif
-    // Main droite : on sonde d'abord à droite avec le capteur avant (le capteur droit lit ~78 mm
-    // dans certaines ouvertures, indiscernable d'un mur). Libre : on y va. Sinon on revient et on part à gauche.
-    if (tourner('D', PAS_MIN, PAS_SONDE_D) == 0)
+    // Main droite : le capteur droit lit ~65-105 mm à tous les coins, ouverture ou pas (monté trop en arrière).
+    // On pivote donc d'un angle fixe (~90°) à droite et on mesure avec le capteur avant, de face :
+    // de biais, il ne reçoit pas d'écho et croit la voie libre.
+    tone(PIN_BUZZER, 2500, 60);
+    for (int k = 0; k < PAS_SONDE_D; k++) pas('D');
+    int vue = max(lire(AVANT), lire(AVANT));
+    journalMesure(vue, dD);                  // dernière paire du journal = mesure de la sonde
+    if (vue >= AVANT_LIBRE) {
+      journalVirage('D');
+    } else {
+      journalVirage('G');
       tourner('G', PAS_SONDE_D + PAS_MIN, PAS_SONDE_D + PAS_MAX);
+    }
+#if DEBUG
+    Serial.print(F("-> sonde droite : ")); Serial.println(vue);
+#endif
     ecartPrec = 0;
     return;
   }
 
-  // 3. Ligne droite en gardant CONSIGNE mm au mur droit (ecart > 0 : trop loin, tourner à droite)
-  int ecart = dD - CONSIGNE;
+  // Coincé contre un mur (il frotte sans avancer) : l'avant ne bouge plus pendant ~2 s.
+  // Recul, puis petit pas qui l'écarte du mur le plus proche.
+  static int avRef = 0;
+  static uint8_t immobile = 0;
+  if (dAv < 255 && abs(dAv - avRef) <= 3) {
+    if (++immobile >= T_COINCE) {
+      immobile = 0;
+      journalVirage('B');
+      moteurs(-V_SUIVI, -V_SUIVI);
+      delay(T_RECUL);
+      arret();
+      delay(PAUSE_MESURE);
+      pas((dG >= 0 && dG < dD) ? 'D' : 'G');
+      ecartPrec = 0;
+      return;
+    }
+  } else {
+    avRef = dAv;
+    immobile = 0;
+  }
+
+  // 3. Ligne droite. Murs des deux côtés : se centrer (dD = dG). Sinon garder CONSIGNE mm au mur droit.
+  // ecart > 0 : trop loin du mur droit, tourner à droite
+  int ecart = (dG >= 0 && dG < MUR_PERDU) ? (dD - dG) / 2 : dD - CONSIGNE;
   int corr = (int)(KP * ecart + KD * (ecart - ecartPrec));
   ecartPrec = ecart;
   corr = constrain(corr, -V_SUIVI / 4, V_SUIVI / 4);   // braquage doux : il reste dans l'axe du couloir
