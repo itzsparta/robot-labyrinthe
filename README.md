@@ -1,5 +1,26 @@
 # Robot labyrinthe
 
+Robot autonome qui parcourt un labyrinthe de 12 virages avec trois capteurs de
+distance, sans encodeur ni gyroscope. Projet d'école d'ingénieurs, en Arduino (C++).
+
+**Résultat** : parcours complet réussi 3 fois de suite sans erreur, en 16 s le
+tour, soit la vitesse maximale des servos alimentés en 5 V.
+
+**Ce que le projet montre**
+- Mise en service de 3 capteurs I2C de même adresse (activation un par un, réadressage).
+- Huit versions successives du programme, de la liste de virages connue à la
+  conduite réactive sans arrêt.
+- Un diagnostic : les mauvaises décisions ne venaient pas du code mais du cône des
+  capteurs qui touchait le sol. Trouvé par un test statique, corrigé en inclinant
+  les capteurs.
+- Des mesures plutôt que des réglages à l'aveugle : point d'arrêt de chaque servo,
+  vitesse de pivot, saturation des servos mesurée avec un test dédié.
+
+La démarche complète, avec les problèmes rencontrés et leurs causes, est dans
+[`RAPPORT_demarche.md`](RAPPORT_demarche.md).
+
+## Matériel
+
 Cytron Maker Nano + 3x VL6180X (Pololu #2489) + 2x servos FS90R.
 Bibliothèques Arduino : `VL6180X` (Pololu), `Servo`. Carte : Arduino Nano, ATmega328 (nouveau bootloader).
 
